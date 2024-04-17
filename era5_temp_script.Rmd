@@ -1,0 +1,228 @@
+---
+title: "Temperature Script"
+author: "David Leydet"
+date: "2024-01-17"
+output: 
+ html_document:
+   toc: yes
+   toc_depth: 3
+   theme: yeti
+   toc_float: yes
+---
+
+```{r Libraries, message=FALSE}
+
+
+library(mapview) #mapping package
+library(raster) #raster data manipulation (Climate Data)
+library(RColorBrewer) #color palettes for visualization
+library(sf) #simple features for spatial data
+library(tmap) #mapping package
+library(viridis) #color palette for visualization
+library(ncdf4) #working with netCDF files (Climate Data)
+library(leaflet) #basemaps for mapview
+library(ggplot2) #better figures
+library(ggcorrplot) #Load the correlation plot package
+library(plotly) #interactive figures
+library(maps) #mapping 
+library(kableExtra) #creating better tables and outputs
+library(dplyr) #count and data functions
+library(reshape2) ## Package used to reformat data - wide to long
+library(tidyverse) ##Formatting dataframes, merge, and join
+library(stargazer) ##Formatting model outputs to tables
+library(pscl) ##Used to calculate pseudo r^2 values for log regression models (poisson)
+library(janitor) ##Used to count/provide summaries for dataframes
+library(jtools) ##Used to produce aesthetically pleasing model output tables
+library(huxtable) ##Used in conjunction with jtools to export model outputs
+library(flextable) ##Needed to knit. linked to the janitor library
+library(geomerge) ##Merges conducts a series of spatial joins to combine geospatial data ##Andrew Linke recommendation!!
+library(tidyr) ##reshaping data formats long/wide
+library(lubridate) ##Helps dealing with date/time ##Needed for geomerge
+library(caret) ##min/max scaling pre-process
+
+
+```
+
+
+# **Climate Data**
+
+## **Temperature Data**
+
+```{r Temp Data Read}
+## Read in the temperature data
+
+pak.temp = raster("../data/temperature/seasonal_temp_data.nc", varname = "t2m")
+
+## Look at the data
+pak.temp
+
+## 52 bands = 13 years * 4 months (Jan, Apr, July, Oct) worth of observations
+## **Reminder the temperature data is in Kelvin**
+
+```
+
+
+```{r Temp Raster Stack}
+## Bring in the temp data as a stack in order to extract the bands (year/month that you need)
+
+temp.stack = stack("../data/temperature/seasonal_temp_data.nc", varname = "t2m")
+
+## View the stack
+temp.stack
+
+```
+
+
+```{r Temp Raster Crop and Mask Pipeline}
+## Crop and Mask Pipeline
+
+temp.stack.mask = temp.stack %>% 
+  crop(pak.bound) %>% 
+  mask(mask = pak.bound) ##pak.bound is just the geometry of Pakistan. This essentially "cuts" the raster stack by Pakistan
+
+## Check
+temp.pal = brewer.pal(n = 9, 
+                      name = "OrRd")
+
+plot(temp.stack.mask,
+     col = temp.pal) ##color palette - define it how you'd like
+plot(st_geometry(pak.bound),
+     border = "black",
+     add = TRUE)
+
+
+```
+
+
+
+```{r Extract Raster Values by District}
+##----TEST----##
+## Works Well!
+
+## Extract the mean value by district
+
+test.temp.extract = raster::extract(temp.stack.mask, pak.bound.adm2, fun = mean, na.rm = TRUE)
+
+## Check
+summary(test.temp.extract)
+```
+
+
+
+```{r Add Temp to test.df 1}
+## Add the temperature data to the test.df
+
+#add district names to the temperature data frame
+dist.names = test.df$districts ##test.df is the new data frame I created
+
+## Check the class of the temp extract
+class(test.temp.extract)
+
+## Convert the extract to a dataframe
+temp.extract.df = as.data.frame(test.temp.extract)
+
+## Check
+class(temp.extract.df)
+dim(temp.extract.df)
+
+## Good - 160 rows(districts) by 52 time steps
+
+```
+
+
+
+```{r Add Temp to test.df 2}
+
+## Change the rownames of the temp.extract df
+rownames(temp.extract.df) = dist.names
+
+## Check
+rownames(temp.extract.df)
+
+## Add rownames as a column
+temp.extract.df = tibble::rownames_to_column(temp.extract.df, "districts")
+
+## Check
+head(temp.extract.df)
+
+## Check the NAs
+## Find the NAs
+#temp.df.nas = temp.extract.df %>% 
+  #filter_all(any_vars(. %in% c(NA)))
+
+## Check
+#temp.df.nas
+
+##This code deals with NA values
+
+temp.extract.df[!complete.cases(temp.extract.df), ]
+## Korangi Karachi - Row 77 has NaN - this is likely because of its small size ~108 km2
+
+## Duplicate East Karachi's observations (Nearest neighbor)
+kk.temp.estimate = temp.extract.df[temp.extract.df$districts == "East Karachi", 1:53]
+
+kk.temp.estimate[1,1] = "Korangi Karachi"
+
+
+temp.extract.df[77,] = kk.temp.estimate
+
+## Check
+temp.extract.df[77,]
+summary(temp.extract.df)
+```
+
+
+```{r Add Temp to test.df 3}
+
+## Create a vector for temp_
+#temp_ = rep(c("temp.jan_", "temp.apr_", "temp.jul_", "temp.oct_"), times = 13)
+
+## Duplicate the dataframe
+temp.extract.df2 = temp.extract.df
+
+## Create a vector for years
+year = c("temp.jan_2010", "temp.apr_2010", "temp.jul_2010", "temp.oct_2010", "temp.jan_2011", "temp.apr_2011", "temp.jul_2011", "temp.oct_2011", "temp.jan_2012", "temp.apr_2012", "temp.jul_2012", "temp.oct_2012", "temp.jan_2013", "temp.apr_2013", "temp.jul_2013", "temp.oct_2013", "temp.jan_2014", "temp.apr_2014", "temp.jul_2014", "temp.oct_2014", "temp.jan_2015", "temp.apr_2015", "temp.jul_2015", "temp.oct_2015", "temp.jan_2016", "temp.apr_2016", "temp.jul_2016", "temp.oct_2016", "temp.jan_2017", "temp.apr_2017", "temp.jul_2017", "temp.oct_2017", "temp.jan_2018", "temp.apr_2018", "temp.jul_2018", "temp.oct_2018", "temp.jan_2019", "temp.apr_2019", "temp.jul_2019", "temp.oct_2019", "temp.jan_2020", "temp.apr_2020", "temp.jul_2020", "temp.oct_2020", "temp.jan_2021", "temp.apr_2021", "temp.jul_2021", "temp.oct_2021", "temp.jan_2022", "temp.apr_2022", "temp.jul_2022", "temp.oct_2022")
+
+## Change the names!!
+names(temp.extract.df2)[2:53] = year 
+
+
+## Check
+names(temp.extract.df2)
+
+
+```
+
+
+```{r Add Temp to test.df 4}
+## Conversion to celsius
+## kelvin - 273.15 = celsius
+k_to_c = function(x) {
+  (x - 273.15)
+}
+
+## Test
+#x = c(287.0471, 306.7410, 303.9115, 301.3161)
+#k_to_c(x)
+
+## Convert to Celsius
+temp.extract.df2 = k_to_c(temp.extract.df2[,2:53])
+
+
+## Check
+head(temp.extract.df2)
+
+```
+
+
+```{r cbind Temp to test.df - 5}
+#create a copy
+
+## Merge to the test dataframe
+test.df = cbind(test.df, temp.extract.df2)
+
+
+## Check 
+head(test.df)
+dim(test.df)
+```
